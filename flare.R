@@ -1,6 +1,3 @@
-
-#debbie
-
 library(flare)
 
 # Enligt källkoden för slim:
@@ -17,9 +14,10 @@ eps = rnorm(n)
 Y = X %*% beta + eps
 
 # MIssing data
-X[sample.int(nrow(X), floor(nrow(X) * 1)), sample.int(ncol(X), floor(ncol(X) * 1))] <- NA
+X[sample.int(nrow(X), floor(nrow(X) * 1)),
+  sample.int(ncol(X), floor(ncol(X) * 1))] <- NA
 
-## Regression with "dantzig", general "lq" and "lasso" respectively
+## Regression with "dantzig"
 out <- slim(X, Y, method = "dantzig")
 
 ## Display results
