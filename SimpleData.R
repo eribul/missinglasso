@@ -1,9 +1,37 @@
 #----setup-------------------------------------------------------------
 
-rm(list = ls()) 
+rm(list = ls())
 
 
 library(glmnet)
+library(flare)
+
+
+
+#--------dantzig examnple-------------------------------------------------
+
+set.seed(123)
+n = 100
+d = 200
+d1 = 10
+rho0 = 0.3
+lambda = c(3:1)*sqrt(log(d)/n)
+Sigma = matrix(0,nrow=d,ncol=d)
+Sigma[1:d1,1:d1] = rho0
+diag(Sigma) = 1
+mu = rep(0,d)
+X = mvrnorm(n=2*n,mu=mu,Sigma=Sigma)
+X.fit = X[1:n,]
+X.pred = X[(n+1):(2*n),]
+
+
+eps = rt(n=n,df=n-1)
+beta = c(rep(sqrt(1/3),3),rep(0,d-3))
+Y.fit = X.fit%*%beta+eps
+## Regression with "dantzig".
+out=slim(X=X.fit,Y=Y.fit,lambda=lambda,method = "lq",q=1)
+
+#------------------------------------------------
 
 
 #----generate data-----------------------------------------------------
@@ -16,8 +44,8 @@ Y = X %*% beta + eps
 
 
 # dataframe for complete data
-data1 <- cbind(X,Y) %>% 
-  as_tibble() 
+data1 <- cbind(X,Y) %>%
+  as_tibble()
 colnames(data1)<- c("X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "Y")
 
 x <- model.matrix(Y~., data1)[,-1]
@@ -27,8 +55,8 @@ y <- data1$Y
 # dataframe for missing data
 X[sample.int(nrow(X), floor(nrow(X) * .2)), sample.int(ncol(X), floor(ncol(X) * .3))] <- NA
 
-data2 <- cbind(X,Y) %>% 
-  as_tibble() 
+data2 <- cbind(X,Y) %>%
+  as_tibble()
 colnames(data2)<- c("X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "Y")
 
 data2 <- na.omit(data2)
@@ -42,8 +70,8 @@ y <- data2$Y
 # with mean
 X[sample.int(nrow(X), floor(nrow(X) * .2)), sample.int(ncol(X), floor(ncol(X) * .3))] <- NA
 
-data2 <- cbind(X,Y) %>% 
-  as_tibble() 
+data2 <- cbind(X,Y) %>%
+  as_tibble()
 colnames(data2)<- c("X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "Y")
 
 data2$V1[is.na(data2$V1)] <- mean(data2$V1, na.rm = TRUE)
@@ -57,7 +85,7 @@ y <- data2$V9
 
 # estimate lasso
 lambda <- 10^seq(10, -2, length = 100)
-set.seed(123) 
+set.seed(123)
 lasso=glmnet(x,y, alpha = 1, family = "gaussian")
 
 # plot coefficient path
