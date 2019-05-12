@@ -1,88 +1,42 @@
 ---
-title: "Missing Data & LASSO"
-author: "Project 3"
-date: "updated: `r Sys.Date()`"
-output:
-  xaringan::moon_reader:
-    lib_dir: libs
-    nature:
-      highlightStyle: github
-      highlightLines: true
-      countIncrementalSlides: false
+title: "Lasso under Missing Data"
+author: "Authors"
+date: 'updated: `r Sys.Date()`'
+output: ioslides_presentation
 ---
 
 ```{r setup, include=FALSE}
-options(htmltools.dir.version = FALSE)
+knitr::opts_chunk$set(echo = FALSE)
 ```
 
----
-# Methodology 
+## Methodology 
 
-### Data
-  + simulate data
-  + nature and degree of missingness 
-  + missing in X correlated or uncorrelated with y
+- Data
+  - simulate data
+  - nature and degree of missingness 
+  - missing in X correlated or uncorrelated with y
 
-### Imputation (Which goal?)
-  + Inference (unbiasedness) or
-  + Prediction (accuracy)
+- Imputation (Which goal?)
+  - Inference (unbiasedness) or
+  - Prediction (accuracy)
   
-### Compare models performance
-  + LASSO
-  + dantzig 
+- Compare variable selection
+  - LASSO
+  - Dantzig Selector 
 
----
-# Nature of missing data
-<!-- https://stats.idre.ucla.edu/stata/seminars/mi_in_stata_pt1_new/ -->
-
-### 1. Missing completely at random (MCAR)
-
-  + neither the variables in the dataset nor the unobserved value of the variable itself predic twhether a value will be missing
-  + ex. in health surveys, some observations are drawn randomly to undergo more extensive physical examination 
-  + No biases but high standard errors for betas 
-
-### 2. Missing at random (MAR)
-
-  + other variables (but not the variable itself) in the dataset can be used to predict missingness on a given variable
-  + ex. in some surveys, men may be more likely to decline to answer some questions than women
-  + i.e. gender predicts missingness on another variable
+## Dantzig Selector
 
 
-### 3. Not missing at random (NMAR)
-  + value of the unobserved variable ifself predicts missingness
-  + ex. individuals with high incomes are more likely to decline to answer questions
-  + most imputation methods not necessarily better than just omitting the missing data (in terms of biases?)
+## Result 1: LASSO and Missing Data
 
----
-# Imputation methods
-### 1. Single imputation
 
-| Methods | Benefits | Limitations  |
-| ------------- |:-------------:| -----:|
-| Mean       | simple  | reduce variability |
-| Conditional mean/regression |   | reduce variability |
-| Stochastic | |  compensate lost variability |
-| KNN      |       |  |
-| Tree |      |  |
+## Result 2: LASSO and Dantzig Selector
 
----
+```{r, echo=FALSE,out.width="49%", out.height="20%",fig.cap="caption",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("data1_lasso.png","data1_lasso.png"))
+```
 
-### 2. Multiple imputation (not for prediction?)
+## Summary
 
-Step 1: the missing data are filled in with estimated values and a complete data set is created. This process of fill-in is repeated m times
-
-Step 2: each of the m complete data sets is then analyzed using a statistical method of interest (e.g. linear regression)
-
-Step 3: the parameter estimates (e.g. coefficients and standard errors) obtained from each analyzed data set are then combined for inference
-
----
-
-# Performance of models
-
----
-
-# Discussion
-
-### Why which models work/not work with which imputation 
-
----
+- LASSO
+- Dantzig
