@@ -294,7 +294,6 @@ df_fig %>%
 ggsave("knn_bagged.png", height = 20, width = 30, units = "cm")
 
 
-
 # Notes! ----------------------------------------------------------
 # Lecture slides 11 slide 13 says that Bootstrap methods etc are
 # not good for significance tests etc for lasso.
