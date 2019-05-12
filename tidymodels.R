@@ -4,7 +4,7 @@ library(furrr)
 
 set.seed(123)
 memory.limit(1e9)
-future::plan(multiprocess)
+# future::plan(multiprocess)
 
 # Synthetic data ----------------------------------------------------------
 
@@ -13,14 +13,14 @@ future::plan(multiprocess)
 #' @param cols number of columns
 #' @param related proportion of variables related to outcome
 #' @return data frame with specified number of rows and columns
-rdata <- function(cols = 1e3, rows = 1e3, related = 1) {
+rdata <- function(cols = 1e3, related = 1, rows = 1e3) {
 
   # Random functions chosen randomly to generate random data
   # First name of functions (for presentation), then functions themselves
   funs_s  <- sample(c("rnorm", "rexp", "runif"), cols, replace = TRUE)
   funs    <- lapply(funs_s, get)
 
-  rel <- seq_len(cols) <= cols * related
+  rel <- seq_len(cols) <= max(cols * related, 1)
 
   X  <- sapply(funs, exec, rows)
   Xy <- X[,  rel, drop = FALSE]
@@ -51,13 +51,13 @@ miss <- function(x, prop = 0) {
 # Data object -------------------------------------------------------------
 df_all <-
   crossing(
-    p = seq(10, 50, 1e1), # no of parameters
-    n = 1000, #seq(10, 50, 1e1)  # no of cases
+    p = 50, # seq(10, 50, 1e1),
+    related = seq(0, 1, .1),
   ) %>%
-  mutate(data = future_map2(p, n, rdata)) %>% # Slumpdata med p cols och n rows
-  crossing(missing = seq(0, .5, .1)) %>% # andel som sätts till missing
+  mutate(data = future_map2(p, related, rdata)) %>%
+  crossing(missing = seq(0, 1, .1)) %>%
   mutate(
-    data = future_map2(data, missing, miss), # ta bort missing andel från resp
+    data = future_map2(data, missing, miss),
     data = map(data, as_tibble)
   )
 
@@ -75,6 +75,7 @@ reci <- function(x) {
 
 df_imp <-
   df_all %>%
+  # slice(1:3) %>%
   crossing(
     impute_nm = c(
       # "step_bagimpute",    # Funkar men långsamt!
@@ -89,15 +90,16 @@ df_imp <-
   ) %>%
   mutate(
     imp_fun  = map(impute_nm, get),
-    rec      = future_map(data, reci),
-    imp_rec  = future_map2(rec, imp_fun, ~ .x %>% .y(all_predictors())),
-    imp_prep = future_map2(imp_rec, data, prep),
-    imp_data = future_map(imp_prep, juice)
+    rec      = future_map(data, reci, .progress = TRUE),
+    imp_rec  = future_map2(rec, imp_fun, ~ .x %>% .y(all_predictors()),
+                           .progress = TRUE),
+    imp_prep = future_map2(imp_rec, data, prep, .progress = TRUE),
+    imp_data = future_map(imp_prep, juice, .progress = TRUE)
   ) %>%
-  select(p, n, missing, impute_nm, imp_data)
+  select(p, related, missing, impute_nm, imp_data)
 
 saveRDS(df_imp, "df_imp.rds") # cache
-plan(sequential) # Close workers to free memory
+# plan(sequential) # Close workers to free memory
 
 
 # Lasso -------------------------------------------------------------------
@@ -110,8 +112,12 @@ lasso <- function(dat, penalty) {
 }
 
 # Fins best penalty for lasso using CV
-best_lambda <- function(data) {
-  glmnet::cv.glmnet(as.matrix(select(data, -Y)), data$Y)$lambda.min
+cv_glmnet <- function(data) {
+  glmnet::cv.glmnet(as.matrix(select(data, -Y)), data$Y)
+}
+
+n_zero <- function(cvobj) {
+  if (!is.null(cvobj)) with(cvobj, nzero[lambda == lambda.min]) else NA
 }
 
 # Observed and predicted values to compare
@@ -121,33 +127,41 @@ obspred <- function(fit, new_data) {
 
 # Assessment metrics to evaluate prediction power
 metr <- function(data) {
-  metrics(data, truth, .pred)
+  yardstick::metrics(data, truth, .pred)
 }
 
 # Summarise metrics from CV
 metr_sum <- function(x) {
   group_by(x, .metric) %>%
   summarise(
-    median = median(.estimate, na.rm = TRUE),
+    median = median(  .estimate,       na.rm = TRUE),
     ci_low = quantile(.estimate, .025, na.rm = TRUE),
     ci_hi  = quantile(.estimate, .925, na.rm = TRUE)
   ) %>%
   ungroup()
 }
 
+# plan(multiprocess) # Get it back!
+
 df_lasso <-
   df_imp %>%
   mutate(
-    lambda   = future_map_dbl(imp_data, possibly(best_lambda, NA)),
-    cv       = map(imp_data, possibly(vfold_cv, NULL)),
-    df_train = map(cv, ~ map(.$splits, analysis)),
-    df_test  = map(cv, ~ map(.$splits, assessment)),
-    fit      = future_map2(
-                 df_train, lambda, ~ map(.x, possibly(lasso, NULL), .y)),
-    obspred  = future_map2(fit, df_test, map2, possibly(pred, NULL)),
-    metr     = future_map(obspred, map, possibly(metr, NULL)),
-    metr     = map(metr, possibly(bind_rows, NULL)),
-    metr_sum = map(metr, possibly(metr_sum,  tibble()))
+    cv.glmnet = future_map(imp_data, possibly(cv_glmnet, NULL),
+                           .progress = TRUE),
+    lambda    = map_dbl(cv.glmnet,
+                        ~ if (!is.null(.)) {.$lambda.min} else {NA}),
+    df        = map_dbl(cv.glmnet, n_zero),
+    boot      = map(imp_data, possibly(bootstraps, NULL)),
+    df_train  = map(boot, ~ map(.$splits, analysis)),
+    df_test   = map(boot, ~ map(.$splits, assessment)),
+    fit       = future_map2(
+                  df_train, lambda, ~ map(.x, possibly(lasso, NULL), .y),
+                  .progress = TRUE),
+    obspred   = future_map2(fit, df_test, map2, possibly(obspred, NULL),
+                            .progress = TRUE),
+    metr      = future_map(obspred, map, possibly(metr, NULL), .progress = TRUE),
+    metr      = map(metr, possibly(bind_rows, NULL)),
+    metr_sum  = map(metr, possibly(metr_sum,  tibble()))
   )
 
 
@@ -156,15 +170,21 @@ df_lasso <-
 # Figure data
 df_fig <-
   df_lasso %>%
-  select(p, n, missing, impute_nm, lambda, metr_sum) %>%
+  select(p, related, missing, impute_nm, lambda, df, metr_sum) %>%
   filter(!is.null(metr_sum)) %>%
   unnest(metr_sum) %>%
-  mutate(Imputation = gsub("(^step_)|(impute$)", "", impute_nm))
+  mutate(Imputation = gsub("(^step_)|(impute$)", "", impute_nm)) %>%
+  filter(.metric == "rmse") %>%
+  gather("measure", "value", df, median) %>%
+  mutate_at(vars(ci_low, ci_hi), ~ replace(., measure == "df", NA)) %>%
+  select(-.metric, -impute_nm) %>%
+  mutate(measure = replace(measure, measure == "median", "RMSE"))
 
 # Make figure
-df_fig %>%
-  ggplot(aes(missing, median, label = lambda)) +
-  facet_grid(.metric ~ p, scales = "free") +
+fig <- function(data) {
+  data %>%
+  ggplot(aes(missing, value)) +
+  facet_grid(measure ~ related, scales = "free") +
   geom_line(aes(color = Imputation)) +
   geom_ribbon(
     aes(ymin = ci_low, ymax = ci_hi, fill = Imputation), alpha = .3) +
@@ -174,16 +194,109 @@ df_fig %>%
   ) +
   scale_x_continuous(minor_breaks = NULL) +
   labs(
-    x     = "Model assessment",
-    y     = "Proportion of missing data before imputation",
+    y     = "",
+    x     = "Proportion of missing data before imputation",
     title = "Missing data decrease predictive power"
   )
+}
 
-ggsave("results.png", height = 20, width = 30, units = "cm")
+# Figure including na.omit onstead of imputation.
+# Distorts the axis but might be an interesting comparison
+fig(df_fig)
+ggsave("naomit.png", height = 20, width = 30, units = "cm")
 
-# Suggestions for the plot
-#
-# - Add Bag impute
-# - Try to extend missingness to 1 or at least higher than 0.5
-# - Focus on RMSE and use facet rows for proportion of unrelated features?
-# - Skip CI to make figure clearer (at lest if bag imputation overlap as well)
+# Remove naomit to see results more clearly
+fig(filter(df_fig, Imputation != "naomit"))
+ggsave("mean_median.png", height = 20, width = 30, units = "cm")
+
+
+
+# KNN and bagged imputation ----------------------------------------------------
+
+# Was not able to do this simultanesly as other methods since it requires too
+# much memory to allow for bootstrapped based CI etc.
+# I use the same object names to overwrite earlier (no longer needed) objects
+# to save memory
+
+
+df_imp <-
+  df_all %>%
+  filter(related == .5, missing %in% c(.2, .4, .6, .8)) %>%
+  crossing(
+    impute_nm = c("step_bagimpute", "step_knnimpute")
+  ) %>%
+  mutate(
+    imp_fun  = map(impute_nm, get),
+    rec      = future_map(data, reci, .progress = TRUE),
+    imp_rec  = future_map2(rec, imp_fun, ~ .x %>% .y(all_predictors()),
+                           .progress = TRUE),
+    imp_prep = future_map2(imp_rec, data, prep, .progress = TRUE),
+    imp_data = future_map(imp_prep, juice, .progress = TRUE)
+  ) %>%
+  select(p, related, missing, impute_nm, imp_data)
+  mutate(
+    rec      = future_map(data, reci, .progress = TRUE),
+    imp_rec  = future_map(rec, step_knnimpute, all_predictors(),
+                           .progress = TRUE),
+    imp_prep = future_map2(imp_rec, data, prep, .progress = TRUE),
+    imp_data = future_map(imp_prep, juice, .progress = TRUE)
+  ) %>%
+  select(p, related, missing, imp_data)
+
+
+df_lasso <-
+  df_imp %>%
+  mutate(
+    cv.glmnet = future_map(imp_data, possibly(cv_glmnet, NULL),
+                           .progress = TRUE),
+    lambda    = map_dbl(cv.glmnet,
+                        ~ if (!is.null(.)) {.$lambda.min} else {NA}),
+    df        = map_dbl(cv.glmnet, n_zero),
+    df_split  = map(imp_data, initial_split),
+    df_train  = map(df_split, training),
+    df_test   = map(df_split, testing),
+    fit       = future_map2(
+                  df_train, lambda, possibly(lasso, NULL),
+                  .progress = TRUE),
+    obspred   = future_map2(fit, df_test, possibly(obspred, NULL),
+                            .progress = TRUE),
+    metr_sum   = future_map(obspred, possibly(metr, NULL), .progress = TRUE),
+  )
+
+df_fig <-
+  df_lasso %>%
+  select(p, missing, lambda, df, metr_sum, impute_nm) %>%
+  filter(!is.null(metr_sum)) %>%
+  unnest(metr_sum) %>%
+  filter(.metric == "rmse") %>%
+  gather("measure", "value", df, .estimate) %>%
+  select(-.metric) %>%
+  mutate(measure = replace(measure, measure == ".estimate", "RMSE")) %>%
+  mutate(impute_nm = gsub("(^step_)|(impute$)", "", impute_nm))
+
+
+df_fig %>%
+  ggplot(aes(missing, value, color = impute_nm)) +
+  facet_wrap(. ~ measure, scales = "free") +
+  geom_line() +
+  theme_light() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank()
+  ) +
+  scale_x_continuous(minor_breaks = NULL) +
+  labs(
+    y     = "",
+    x     = "Proportion of missing data before imputation",
+    title = "Bagged imputation",
+    subtitle = "p = 50, related = .5"
+  )
+
+ggsave("knn_bagged.png", height = 20, width = 30, units = "cm")
+
+
+
+# Notes! ----------------------------------------------------------
+# Lecture slides 11 slide 13 says that Bootstrap methods etc are
+# not good for significance tests etc for lasso.
+# Good to mention!
