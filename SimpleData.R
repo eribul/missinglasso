@@ -19,7 +19,7 @@ library(tidyr)
 
 #----generate data 1-----------------------------------------------------
 # read the table with nested simulated dataframes
-df_imp <- readRDS("C:/Users/Kokchun/Desktop/temp/df_imp.rds")
+df_imp <- readRDS("C:/Users/Debbie/Desktop/temp/df_imp.rds")
 
 # extract data dataframes
 # pick p=50, n=1000
@@ -106,16 +106,16 @@ abline(v = norm., col = "red")
 
 
 #----Lasso plot with flare------------------------------------------
-nlamb = 500
-ratio = 0.3
 
-lasso2 = slim(X=x3,Y=y3,nlambda=nlamb,lambda.min.ratio=ratio,method="lasso")
-matplot(log(lasso2$lambda), t(lasso2$beta), type = "l", main = "Regularization Path", 
+par(mfcol=c(2,2))
+png("result2.png", width = )
+lasso2 = slim(X=x2,Y=y2,lambda = seq(exp(-3), exp(1), 0.1),method="lasso")
+matplot(log(lasso2$lambda), t(lasso2$beta), type = "l", main = "LASSO, mean imputed", 
         xlab = "log(lambda)", ylab = "Coefficient")
 
 #----Dantzig plot with flare----------------------------------------
-dz = slim(X=x1,Y=y1,nlambda=nlamb,lambda.min.ratio=ratio,method="dantzig")
+dz = slim(X=x2,Y=y2,lambda = seq(exp(-3), exp(1), 0.1), method="dantzig")
 #plot(dz)
-matplot(log(dz$lambda), t(dz$beta), type = "l", main = "Regularization Path", 
-        xlab = "log(lambda)", ylab = "Coefficient")
+matplot(log(dz$lambda), t(dz$beta), type = "l", main = "Dantzig, mean imputed", 
+        xlab = "log(lambda)", ylab = "Coefficient", xlim = c(-3, 1), ylim = c(-3, 2))
 plot(dz)
